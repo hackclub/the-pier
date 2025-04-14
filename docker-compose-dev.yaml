@@ -1,5 +1,6 @@
 services:
   reverse-proxy:
+    image: traefik:v2.11
     expose:
       - "8080"
     ports:
@@ -7,6 +8,8 @@ services:
     command:
       - --api.insecure=true
       - --entryPoints.web.address=:80
+      - --providers.docker
+      - --providers.docker.exposedbydefault=false
     labels:
       - "traefik.enable=true"
       - "traefik.port=8080"
