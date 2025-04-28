@@ -107,6 +107,15 @@ img#banner {
     #linkTO-home:hover {
         background-color: rgb(2, 107, 155);
     }
+    span {
+        background-color: rgb(32, 32, 98);
+        padding: 10px;
+        border-radius: 15px;
+        cursor: pointer;
+    }
+    span:hover {
+        background-color: rgb(13, 114, 173);
+    }
 }
 
 #buffer {
