@@ -107,6 +107,15 @@ img#banner {
     #linkTO-home:hover {
         background-color: rgb(2, 107, 155);
     }
+    span#gateau {
+        background-color: rgb(32, 32, 98);
+        padding: 10px;
+        border-radius: 15px;
+        cursor: pointer;
+    }
+    span#gateau:hover {
+        background-color: rgb(13, 114, 173);
+    }
 }
 
 #buffer {
@@ -117,7 +126,7 @@ img#banner {
         height: 20vw;
     }
     #content {
-        width: 95%;
+        width: 98.5%;
     }
     body {
         background-color: rgb(25, 109, 181);
