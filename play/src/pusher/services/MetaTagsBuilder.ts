@@ -14,9 +14,9 @@ import { ADMIN_API_URL } from "../enums/EnvironmentVariable";
 import { adminService } from "./AdminService";
 
 export const MetaTagsDefaultValue: RequiredMetaTagsData = {
-    title: "WorkAdventure",
-    description: "Create your own digital office, Metaverse and meet online with the world.",
-    author: "WorkAdventure team",
+    title: "The Pier",
+    description: "Hack Club's digital meeting space.",
+    author: "Hack Club",
     provider: "WorkAdventure",
     favIcons: [
         {
