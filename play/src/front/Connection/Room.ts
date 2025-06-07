@@ -8,6 +8,8 @@ import {
     ENABLE_CHAT_DISCONNECTED_LIST,
     ENABLE_CHAT_ONLINE_LIST,
     ENABLE_CHAT_UPLOAD,
+    ENABLE_OPENID,
+    ENABLE_SAY,
     OPID_WOKA_NAME_POLICY,
 } from "../Enum/EnvironmentVariable";
 import { ApiError } from "../Stores/Errors/ApiError";
@@ -34,20 +36,22 @@ export class Room {
     private _group: string | null = null;
     private _expireOn: Date | undefined;
     private _canReport = false;
-    private _miniLogo: string | undefined;
-    private _loadingCowebsiteLogo: string | undefined;
     private _loadingLogo: string | undefined;
     private _loginSceneLogo: string | undefined;
-    private _metadata: unknown | undefined;
+    private _metadata: unknown;
+    private _backgroundSceneImage: string | undefined;
     private _showPoweredBy: boolean | undefined = true;
     private _roomName: string | undefined;
     private _pricingUrl: string | undefined;
     private _enableChat: boolean | undefined;
+    private _isMatrixChatEnabled: boolean | undefined;
     private _enableChatUpload: boolean | undefined;
     private _enableChatOnlineList: boolean | undefined;
     private _enableChatDisconnectedList: boolean | undefined;
+    private _enableSay: boolean | undefined;
     private _legals: LegalsData | undefined;
     private _backgroundColor: string | undefined;
+    private _primaryColor: string | undefined;
     private _iconClothes: string | undefined;
     private _iconAccessory: string | undefined;
     private _iconHat: string | undefined;
@@ -59,6 +63,7 @@ export class Room {
     private _entityCollectionsUrls: string[] | undefined;
     private _errorSceneLogo: string | undefined;
     private _modules: string[] = [];
+    private _isLogged: boolean | undefined;
 
     private constructor(private roomUrl: URL) {
         this.id = roomUrl.pathname;
@@ -137,7 +142,6 @@ export class Room {
             const roomRedirectChecking = isRoomRedirect.safeParse(data);
             const mapDetailsDataChecking = isMapDetailsData.safeParse(data);
             const errorApiDataChecking = ErrorApiData.safeParse(data);
-
             if (roomRedirectChecking.success) {
                 const data = roomRedirectChecking.data;
                 return {
@@ -164,12 +168,12 @@ export class Room {
                 }
                 this._opidWokaNamePolicy = data.opidWokaNamePolicy ?? OPID_WOKA_NAME_POLICY;
                 this._canReport = data.canReport ?? false;
-                this._miniLogo = data.miniLogo ?? undefined;
-                this._loadingCowebsiteLogo = data.loadingCowebsiteLogo ?? undefined;
                 this._loadingLogo = data.loadingLogo ?? undefined;
                 this._loginSceneLogo = data.loginSceneLogo ?? undefined;
+                this._backgroundSceneImage = data.backgroundSceneImage ?? undefined;
                 this._showPoweredBy = data.showPoweredBy ?? true;
                 this._backgroundColor = data.backgroundColor ?? undefined;
+                this._primaryColor = data.primaryColor ?? undefined;
                 this._metadata = data.metadata ?? undefined;
 
                 this._roomName = data.roomName ?? undefined;
@@ -178,11 +182,12 @@ export class Room {
                 this._legals = data.legals ?? undefined;
 
                 this._enableChat = (data.enableChat ?? true) && ENABLE_CHAT;
+                this._isMatrixChatEnabled = (data.enableMatrixChat ?? true) && ENABLE_OPENID;
                 this._enableChatUpload = (data.enableChatUpload ?? true) && ENABLE_CHAT_UPLOAD;
                 this._enableChatOnlineList = (data.enableChatOnlineList ?? true) && ENABLE_CHAT_ONLINE_LIST;
                 this._enableChatDisconnectedList =
                     (data.enableChatDisconnectedList ?? true) && ENABLE_CHAT_DISCONNECTED_LIST;
-
+                this._enableSay = (data.enableSay ?? true) && ENABLE_SAY;
                 this._iconClothes = data.customizeWokaScene?.clothesIcon ?? undefined;
                 this._iconAccessory = data.customizeWokaScene?.accessoryIcon ?? undefined;
                 this._iconBody = data.customizeWokaScene?.bodyIcon ?? undefined;
@@ -196,6 +201,10 @@ export class Room {
 
                 this._errorSceneLogo = data.errorSceneLogo ?? undefined;
                 this._modules = data.modules ?? [];
+                // If the server returns a value for "isLogged", let's use it.
+                // Even if we are logged in the localUserStore, the user might not be valid for this room.
+                // If no data is passed by the server, fallback to the localUserStore value.
+                this._isLogged = data.isLogged ?? localUserStore.isLogged();
 
                 return new MapDetail(data.mapUrl, data.wamUrl);
             } else if (errorApiDataChecking.success) {
@@ -287,10 +296,6 @@ export class Room {
         return this._canReport;
     }
 
-    get loadingCowebsiteLogo(): string | undefined {
-        return this._loadingCowebsiteLogo;
-    }
-
     get opidWokaNamePolicy(): OpidWokaNamePolicy | undefined {
         return this._opidWokaNamePolicy;
     }
@@ -299,12 +304,12 @@ export class Room {
         return this._loadingLogo;
     }
 
-    get miniLogo(): string | undefined {
-        return this._miniLogo;
-    }
-
     get loginSceneLogo(): string | undefined {
         return this._loginSceneLogo;
+    }
+
+    get backgroundSceneImage(): string | undefined {
+        return this._backgroundSceneImage;
     }
 
     get metadata(): unknown {
@@ -330,6 +335,13 @@ export class Room {
         return this._enableChat;
     }
 
+    get isMatrixChatEnabled(): boolean {
+        if (this._isMatrixChatEnabled === undefined) {
+            return true;
+        }
+        return this._isMatrixChatEnabled;
+    }
+
     get isChatUploadEnabled(): boolean {
         if (this._enableChatUpload === undefined) {
             return true;
@@ -351,12 +363,23 @@ export class Room {
         return this._enableChatDisconnectedList;
     }
 
+    get isSayEnabled(): boolean {
+        if (this._enableSay === undefined) {
+            return true;
+        }
+        return this._enableSay;
+    }
+
     get legals(): LegalsData | undefined {
         return this._legals;
     }
 
     get backgroundColor(): string | undefined {
         return this._backgroundColor;
+    }
+
+    get primaryColor(): string | undefined {
+        return this._primaryColor;
     }
 
     get iconClothes(): string | undefined {
@@ -401,5 +424,12 @@ export class Room {
 
     get modules(): string[] {
         return this._modules;
+    }
+
+    get isLogged(): boolean {
+        if (this._isLogged === undefined) {
+            throw new Error("isLogged not yet initialized.");
+        }
+        return this._isLogged;
     }
 }

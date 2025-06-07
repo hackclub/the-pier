@@ -1,5 +1,5 @@
 import { Room, EventType, EventTimeline } from "matrix-js-sdk";
-import { derived, get, Readable } from "svelte/store";
+import { derived, get, Readable, writable, Writable } from "svelte/store";
 import { KnownMembership } from "matrix-js-sdk/lib/types";
 
 import * as Sentry from "@sentry/svelte";
@@ -7,6 +7,7 @@ import { MapStore } from "@workadventure/store-utils";
 import { Deferred } from "ts-deferred";
 import { RoomFolder } from "../ChatConnection";
 import { MatrixChatRoom } from "./MatrixChatRoom";
+
 export class MatrixRoomFolder extends MatrixChatRoom implements RoomFolder {
     roomList: MapStore<MatrixChatRoom["id"], MatrixChatRoom> = new MapStore<MatrixChatRoom["id"], MatrixChatRoom>();
     folderList: MapStore<MatrixRoomFolder["id"], MatrixRoomFolder> = new MapStore<
@@ -17,6 +18,8 @@ export class MatrixRoomFolder extends MatrixChatRoom implements RoomFolder {
     readonly rooms: Readable<MatrixChatRoom[]>;
     readonly invitations: Readable<MatrixChatRoom[]>;
     readonly folders: Readable<RoomFolder[]>;
+    readonly allSuggestedRooms: Writable<{ name: string; id: string; avatarUrl: string }[]> = writable([]);
+    readonly suggestedRooms: Readable<{ name: string; id: string; avatarUrl: string }[]>;
 
     private loadRoomsAndFolderPromise = new Deferred<void>();
     private joinRoomDeferred = new Deferred<void>();
@@ -64,13 +67,29 @@ export class MatrixRoomFolder extends MatrixChatRoom implements RoomFolder {
             }
         );
 
+        this.suggestedRooms = derived(
+            [this.allSuggestedRooms, this.rooms, this.invitations, this.folders],
+            ([$allSuggestedRooms, $rooms, $invitations, $folders]) => {
+                const existingIds = new Set([
+                    ...$rooms.map((room) => room.id),
+                    ...$invitations.map((room) => room.id),
+                    ...$folders.map((folder) => folder.id),
+                ]);
+                return $allSuggestedRooms.filter((room) => !existingIds.has(room.id));
+            }
+        );
+
         if (get(this.myMembership) === KnownMembership.Join) this.joinRoomDeferred.resolve();
     }
 
-    async init() {
+    init() {
         try {
             if (get(this.myMembership) === KnownMembership.Join) {
-                await this.refreshFolderHierarchy();
+                this.getChildren();
+                this.refreshSuggestedRooms().catch((error) => {
+                    console.error("Failed to refresh suggested rooms:", error);
+                    Sentry.captureException(error);
+                });
             }
             this.loadRoomsAndFolderPromise.resolve();
         } catch (e) {
@@ -218,11 +237,74 @@ export class MatrixRoomFolder extends MatrixChatRoom implements RoomFolder {
         });
     }
 
-    protected override async onRoomMyMembership(room: Room) {
+    async refreshSuggestedRooms() {
+        const { rooms } = await this.room.client.getRoomHierarchy(this.id, 100, 1, true);
+
+        const suggestedMatrixChatRooms: { name: string; id: string; avatarUrl: string }[] = [];
+
+        rooms.forEach((room) => {
+            const roomId = room.room_id;
+
+            if (this.id === roomId) return;
+
+            const chatRoom = this.room.client.getRoom(roomId);
+
+            const avatarUrl = chatRoom?.getAvatarUrl(chatRoom.client.baseUrl, 24, 24, "scale") ?? undefined;
+
+            if (!chatRoom && !this.roomList.has(roomId) && !this.folderList.has(roomId)) {
+                suggestedMatrixChatRooms.push({ name: room.name ?? "", id: roomId, avatarUrl: avatarUrl ?? "" });
+            }
+        });
+
+        this.allSuggestedRooms.set(suggestedMatrixChatRooms);
+    }
+
+    protected override onRoomMyMembership(room: Room) {
         if (room.getMyMembership() === KnownMembership.Join) {
             this.joinRoomDeferred.resolve();
-            await this.refreshFolderHierarchy();
+            this.getChildren();
+            this.refreshSuggestedRooms().catch((error) => {
+                console.error("Failed to refresh suggested rooms:", error);
+                Sentry.captureException(error);
+            });
         }
         super.onRoomMyMembership(room);
+    }
+
+    public getChildren() {
+        const client = this.room.client;
+        const room = this.room;
+
+        const childEvents = room
+            ?.getLiveTimeline()
+            ?.getState(EventTimeline.FORWARDS)
+            ?.getStateEvents(EventType.SpaceChild);
+
+        if (!childEvents) return;
+
+        const children = childEvents
+            .map((ev) => {
+                const stateKey = ev.getStateKey();
+                if (!stateKey) return null;
+
+                const history = client.getRoomUpgradeHistory(stateKey);
+                return history[history.length - 1];
+            })
+            .filter((room): room is Room => {
+                if (!room) return false;
+                return (
+                    room.getMyMembership() === KnownMembership.Join || room.getMyMembership() === KnownMembership.Invite
+                );
+            });
+
+        children.forEach((child) => {
+            if (child.isSpaceRoom()) {
+                const spaceFolder = new MatrixRoomFolder(child);
+                this.folderList.set(child.roomId, spaceFolder);
+                spaceFolder.init();
+            } else {
+                this.roomList.set(child.roomId, new MatrixChatRoom(child));
+            }
+        });
     }
 }

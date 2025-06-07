@@ -3,8 +3,10 @@ import type { Request, Response, Application } from "express";
 import Mustache from "mustache";
 import { uuid } from "stanza/Utils";
 import * as Sentry from "@sentry/node";
+import { z } from "zod";
 import { MetaTagsBuilder } from "../services/MetaTagsBuilder";
 import { adminService } from "../services/AdminService";
+import { getStringPalette, wrapWithStyleTag } from "../services/GenerateCustomColors";
 import { notWaHost } from "../middlewares/NotWaHost";
 import { version } from "../../../package.json";
 import {
@@ -14,6 +16,7 @@ import {
     AUTOLOGIN_URL,
     GOOGLE_DRIVE_PICKER_CLIENT_ID,
 } from "../enums/EnvironmentVariable";
+import { validateQuery } from "../services/QueryValidator";
 import { BaseHttpController } from "./BaseHttpController";
 
 export class FrontController extends BaseHttpController {
@@ -143,11 +146,17 @@ export class FrontController extends BaseHttpController {
         });
 
         this.app.get("/static/images/favicons/manifest.json", (req: Request, res: Response) => {
-            if (req.query.url == undefined) {
-                res.status(500).send("playUrl is empty in query parameter of the request");
+            const query = validateQuery(
+                req,
+                res,
+                z.object({
+                    url: z.string(),
+                })
+            );
+            if (query === undefined) {
                 return;
             }
-            return this.displayManifestJson(req, res, req.query.url.toString());
+            return this.displayManifestJson(req, res, query.url);
         });
 
         this.app.get("/login", (req: Request, res: Response) => {
@@ -214,7 +223,7 @@ export class FrontController extends BaseHttpController {
         try {
             redirectUrl = await builder.getRedirectUrl();
         } catch (e) {
-            console.info(`Cannot get redirect URL ${url}`, e);
+            console.info(`Cannot get redirect URL "%s"`, url, e);
         }
 
         if (redirectUrl) {
@@ -243,7 +252,14 @@ export class FrontController extends BaseHttpController {
 
         try {
             const metaTagsData = await builder.getMeta(req.header("User-Agent"));
+            const mapDetails = await builder.getMapDetails();
             let option = {};
+            const secondaryPalette = getStringPalette(mapDetails?.primaryColor, "secondary");
+            const contrastPalette = getStringPalette(mapDetails?.backgroundColor, "contrast");
+            let cssVariablesOverride = "";
+            if (secondaryPalette || contrastPalette) {
+                cssVariablesOverride = wrapWithStyleTag(`${secondaryPalette}\n${contrastPalette}`);
+            }
             if (req.query.logrocket === "true" && LOGROCKET_ID != undefined) {
                 option = {
                     ...option,
@@ -260,10 +276,11 @@ export class FrontController extends BaseHttpController {
                 script: await this.getScript(),
                 authToken: authToken,
                 googleDrivePickerClientId: GOOGLE_DRIVE_PICKER_CLIENT_ID,
+                cssVariablesOverride,
                 ...option,
             });
         } catch (e) {
-            console.info(`Cannot render metatags on ${url}`, e);
+            console.info(`Cannot render metatags on "%"`, url, e);
         }
 
         res.type("html").send(html);

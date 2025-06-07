@@ -56,7 +56,11 @@ export class AdminController extends BaseHttpController {
                             roomId,
                         },
                         (err) => {
-                            err ? rej(err) : res();
+                            if (err) {
+                                rej(err);
+                                return;
+                            }
+                            res();
                         }
                     );
                 });
@@ -133,7 +137,11 @@ export class AdminController extends BaseHttpController {
                                         type: "", // TODO: what to put here?
                                     },
                                     (err) => {
-                                        err ? rej(err) : res();
+                                        if (err) {
+                                            rej(err);
+                                            return;
+                                        }
+                                        res();
                                     }
                                 );
                             } else if (type === "capacity") {
@@ -142,7 +150,11 @@ export class AdminController extends BaseHttpController {
                                         roomId,
                                     },
                                     (err) => {
-                                        err ? rej(err) : res();
+                                        if (err) {
+                                            rej(err);
+                                            return;
+                                        }
+                                        res();
                                     }
                                 );
                             }
@@ -285,6 +297,8 @@ export class AdminController extends BaseHttpController {
             for (const roomClient of roomClients) {
                 promises.push(
                     new Promise<void>((resolve, reject) => {
+                        console.log("dispatchGlobalEvent => body.name", body.name);
+                        console.log("dispatchGlobalEvent => body.data", body.data);
                         roomClient.dispatchGlobalEvent(
                             {
                                 name: body.name,
@@ -325,7 +339,6 @@ export class AdminController extends BaseHttpController {
     }
 
     sendChatMessagePrompt(): void {
-        // eslint-disable-next-line @typescript-eslint/no-misused-promises
         this.app.post("/chat/message", [adminToken], async (req: Request, res: Response) => {
             const body = req.body;
 
@@ -376,7 +389,11 @@ export class AdminController extends BaseHttpController {
                 await apiClientRepository.getClient(roomId).then((roomClient) => {
                     return new Promise<void>((res, rej) => {
                         roomClient.sendChatMessagePrompt(chatMessagePrompt, (err) => {
-                            err ? rej(err) : res();
+                            if (err) {
+                                rej(err);
+                                return;
+                            }
+                            res();
                         });
                     });
                 });
@@ -390,7 +407,6 @@ export class AdminController extends BaseHttpController {
     }
 
     dispatchExternalModuleEvent(): void {
-        // eslint-disable-next-line @typescript-eslint/no-misused-promises
         this.app.post("/external-module/event", [adminToken], async (req: Request, res: Response) => {
             const body = req.body;
             try {
@@ -422,7 +438,11 @@ export class AdminController extends BaseHttpController {
                                 message,
                             },
                             (err) => {
-                                err ? rej(err) : res();
+                                if (err) {
+                                    rej(err);
+                                    return;
+                                }
+                                res();
                             }
                         );
                     });

@@ -4,7 +4,6 @@ import audio from "./audio";
 import camera from "./camera";
 import chat from "./chat";
 import companion from "./companion";
-import emoji from "./emoji";
 import error from "./error";
 import follow from "./follow";
 import login from "./login";
@@ -19,6 +18,8 @@ import actionbar from "./actionbar";
 import mapEditor from "./mapEditor";
 import megaphone from "./megaphone";
 import video from "./video";
+import form from "./form";
+import say from "./say";
 
 const hsb_DE = merge(en_US, {
     audio,
@@ -32,7 +33,6 @@ const hsb_DE = merge(en_US, {
     menu,
     report,
     warning,
-    emoji,
     trigger,
     notification,
     cowebsite,
@@ -40,6 +40,8 @@ const hsb_DE = merge(en_US, {
     mapEditor,
     megaphone,
     video,
+    form,
+    say,
 });
 
 export default hsb_DE;

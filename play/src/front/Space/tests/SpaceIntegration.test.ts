@@ -84,12 +84,19 @@ vi.mock("../../Phaser/Entity/CharacterLayerManager", () => {
     };
 });
 
+vi.mock("../../Connection/ConnectionManager", () => {
+    return {
+        connectionManager: {
+            roomConnectionStream: new Subject(),
+        },
+    };
+});
 const flushPromises = () => new Promise(setImmediate);
 
 describe("", () => {
     it("should emit event when you create space and spaceFilter", () => {
         const roomConnection = new MockRoomConnection();
-        const spaceRegistry = new SpaceRegistry(roomConnection);
+        const spaceRegistry = new SpaceRegistry(roomConnection, new Subject());
 
         const spaceName = "space1";
 
@@ -116,7 +123,7 @@ describe("", () => {
 
     it("should add user inSpaceFilter._users when receive AddSpaceUserMessage", async () => {
         const roomConnection = new MockRoomConnection();
-        const spaceRegistry = new SpaceRegistry(roomConnection);
+        const spaceRegistry = new SpaceRegistry(roomConnection, new Subject());
 
         const spaceName = "space1";
 
@@ -141,7 +148,8 @@ describe("", () => {
             jitsiParticipantId: undefined,
             uuid: "",
             chatID: undefined,
-        };
+            showVoiceIndicator: false,
+        } satisfies SpaceUser;
 
         const addSpaceUserMessage: AddSpaceUserPusherToFrontMessage = {
             spaceName,
@@ -167,7 +175,7 @@ describe("", () => {
 
     it("should define reactive property after... ", async () => {
         const roomConnection = new MockRoomConnection();
-        const spaceRegistry = new SpaceRegistry(roomConnection);
+        const spaceRegistry = new SpaceRegistry(roomConnection, new Subject());
 
         const spaceName = "space1";
 
@@ -192,7 +200,8 @@ describe("", () => {
             jitsiParticipantId: undefined,
             uuid: "",
             chatID: "chat@id.fr",
-        };
+            showVoiceIndicator: false,
+        } satisfies SpaceUser;
 
         const addSpaceUserMessage: AddSpaceUserPusherToFrontMessage = {
             spaceName,
@@ -213,7 +222,7 @@ describe("", () => {
 
     it("... ", async () => {
         const roomConnection = new MockRoomConnection();
-        const spaceRegistry = new SpaceRegistry(roomConnection);
+        const spaceRegistry = new SpaceRegistry(roomConnection, new Subject());
 
         const spaceName = "space1";
 
@@ -238,7 +247,8 @@ describe("", () => {
             jitsiParticipantId: undefined,
             uuid: "",
             chatID: "chat@id.fr",
-        };
+            showVoiceIndicator: false,
+        } satisfies SpaceUser;
 
         const addSpaceUserMessage: AddSpaceUserPusherToFrontMessage = {
             spaceName,
@@ -281,7 +291,7 @@ describe("", () => {
 
     it("should forward public events to the space", async () => {
         const roomConnection = new MockRoomConnection();
-        const spaceRegistry = new SpaceRegistry(roomConnection);
+        const spaceRegistry = new SpaceRegistry(roomConnection, new Subject());
 
         const spaceName = "space1";
 
@@ -321,7 +331,7 @@ describe("", () => {
 
     it("should forward private events to the space", async () => {
         const roomConnection = new MockRoomConnection();
-        const spaceRegistry = new SpaceRegistry(roomConnection);
+        const spaceRegistry = new SpaceRegistry(roomConnection, new Subject());
 
         const spaceName = "space1";
 

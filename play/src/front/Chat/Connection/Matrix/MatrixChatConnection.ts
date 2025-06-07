@@ -29,6 +29,7 @@ import { KnownMembership } from "matrix-js-sdk/lib/@types/membership";
 import { slugify } from "@workadventure/shared-utils/src/Jitsi/slugify";
 import { AvailabilityStatus } from "@workadventure/messages";
 import { canAcceptVerificationRequest, VerificationRequest } from "matrix-js-sdk/lib/crypto-api";
+import { asError } from "catch-unknown";
 import {
     ChatConnectionInterface,
     ChatRoom,
@@ -37,7 +38,7 @@ import {
     ConnectionStatus,
     CreateRoomOptions,
 } from "../ChatConnection";
-import { selectedRoomStore } from "../../Stores/ChatStore";
+import { selectedRoomStore } from "../../Stores/SelectRoomStore";
 import LL from "../../../../i18n/i18n-svelte";
 import { RequestedStatus } from "../../../Rules/StatusRules/statusRules";
 import { MATRIX_ADMIN_USER, MATRIX_DOMAIN } from "../../../Enum/EnvironmentVariable";
@@ -51,10 +52,6 @@ export const defaultWoka =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABcAAAAdCAYAAABBsffGAAAB/ElEQVRIia1WMW7CQBC8EAoqFy74AD1FqNzkAUi09DROwwN4Ag+gMQ09dcQXXNHQIucBPAJFc2Iue+dd40QZycLc7c7N7d7u+cU9wXw+ryyL0+n00eU9tCZIOp1O/f/ZbBbmzuczX6uuRVTlIAYpCSeTScumaZqw0OVyURd47SIGaZ7n6s4wjmc0Grn7/e6yLFtcr9dPaaOGhcTEeDxu2dxut2hXUJ9ioKmW0IidMg6/NPmD1EmqtojTBWAvE26SW8r+YhfIu87zbyB5BiRerVYtikXxXuLRuK058HABMyz/AX8UHwXgV0NRaEXzDKzaw+EQCioo1yrsLfvyjwZrTvK0yp/xh/o+JwbFhFYgFRNqzGEIB1ZhH2INkXJZoShn2WNSgJRNS/qoYSHxer1+qkhChnC320ULRI1LEsNhv99HISBkLmhP/7L8OfqhiKC6SzEJtSTLHMkGFhK6XC79L89rmtC6rv0YfjXV9COPDwtVQxEc2ZflIu7R+WADQrkA7eCH5BdFwQRXQ8bKxXejeWFoYZGCQM7Yh7BAkcw0DEnEEPHhbjBPQfCDvwzlEINlWZq3OAiOx2O0KwAKU8gehXfzu2Wz2VQMTXqCeLZZSNvtVv20MFsu48gQpDvjuHYxE+ZHESBPSJ/x3sqBvhe0hc5vRXkfypBY4xGcc9+lcFxartG6LgAAAABJRU5ErkJggg==";
 export const defaultColor = "#626262";
 
-export enum INTERACTIVE_AUTH_PHASE {
-    PRE_AUTH = 1,
-    POST_AUTH,
-}
 export class MatrixChatConnection implements ChatConnectionInterface {
     private readonly roomList: MapStore<string, MatrixChatRoom>;
     private client: MatrixClient | undefined;
@@ -85,6 +82,8 @@ export class MatrixChatConnection implements ChatConnectionInterface {
     folders: Readable<MatrixRoomFolder[]>;
     directRoomsUsers: Readable<ChatUser[]>;
     clientPromise: Promise<MatrixClient>;
+    shouldRetrySendingEvents: Readable<boolean>;
+
     constructor(
         clientPromise: Promise<MatrixClient>,
         private statusStore: Readable<
@@ -184,8 +183,15 @@ export class MatrixChatConnection implements ChatConnectionInterface {
                 );
             }
         );
+
         this.usersStatus = new MapStore<string, AvailabilityStatus>();
         this.isEncryptionRequiredAndNotSet = this.matrixSecurity.isEncryptionRequiredAndNotSet;
+
+        this.shouldRetrySendingEvents = derived(
+            Array.from(this.roomList.values()).map((room) => room.shouldRetrySendingEvents),
+            (shouldRetrySendingEvents) =>
+                shouldRetrySendingEvents.some((shouldRetrySendingEvent) => shouldRetrySendingEvent)
+        );
 
         this.handleRoom = this.onClientEventRoom.bind(this);
         this.handleDeleteRoom = this.onClientEventDeleteRoom.bind(this);
@@ -207,6 +213,7 @@ export class MatrixChatConnection implements ChatConnectionInterface {
             this.matrixSecurity.updateMatrixClientStore(this.client);
             await this.startMatrixClient();
             this.isGuest.set(this.client.isGuest());
+            await this.rebuildSpaceHierarchy();
         } catch (error) {
             this.connectionStatus.set("OFFLINE");
             console.error(error);
@@ -362,14 +369,13 @@ export class MatrixChatConnection implements ChatConnectionInterface {
     }
 
     private getParentRoomID(room: Room): string[] {
-        return (room.getLiveTimeline().getState(EventTimeline.FORWARDS)?.getStateEvents("m.space.parent") || []).reduce(
-            (acc, currentMatrixEvent) => {
-                const parentID = currentMatrixEvent.getStateKey();
-                if (parentID) acc.push(parentID);
-                return acc;
-            },
-            [] as string[]
-        );
+        return (
+            room.getLiveTimeline().getState(EventTimeline.FORWARDS)?.getStateEvents(EventType.SpaceParent) || []
+        ).reduce((acc, currentMatrixEvent) => {
+            const parentID = currentMatrixEvent.getStateKey();
+            if (parentID) acc.push(parentID);
+            return acc;
+        }, [] as string[]);
     }
 
     private onAccountDataEvent(event: MatrixEvent) {
@@ -459,72 +465,50 @@ export class MatrixChatConnection implements ChatConnectionInterface {
             return;
         }
 
-        await this.addRoomToFolder(room, parentFolder, isSpaceRoom);
+        this.addRoomToFolder(room, parentFolder, isSpaceRoom);
     }
-    private async addRoomToFolder(room: Room, targetFolder: MatrixRoomFolder, isSpaceRoom: boolean): Promise<void> {
+    private addRoomToFolder(room: Room, targetFolder: MatrixRoomFolder, isSpaceRoom: boolean): void {
         if (isSpaceRoom) {
             const newFolder = new MatrixRoomFolder(room);
             targetFolder.folderList.set(room.roomId, newFolder);
-            try {
-                await newFolder.init();
-            } catch (e) {
-                console.error("Failed to init new folder : ", e);
-                Sentry.captureException(e);
-            }
+
+            newFolder.init();
         } else {
             targetFolder.roomList.set(room.roomId, new MatrixChatRoom(room));
         }
     }
     private async manageRoomOrFolder(room: Room): Promise<void> {
-        const { roomId } = room;
+        const parentsIds = this.getParentRoomID(room);
 
         try {
-            if (await this.findRoomOrFolder(roomId)) {
+            if (parentsIds.length === 0) {
+                this.handleOrphanRoom(room);
                 return;
             }
+
+            await Promise.allSettled(parentsIds.map((parentId) => this.tryAddRoomToParentFolder(room, parentId)));
         } catch (e) {
-            console.error("Failed to find room or folder:", e);
-        }
-
-        if (!this.isUserMemberOrInvited(room)) return;
-        const parentRoomID = this.getFirstParentRoomID(room);
-
-        if (parentRoomID) {
-            const isAdded = await this.tryAddRoomToParentFolder(room, parentRoomID);
-            if (!isAdded && !room.isSpaceRoom()) {
-                this.createAndAddNewRootRoom(room);
-            }
-        } else {
-            try {
-                await this.handleOrphanRoom(room);
-            } catch (e) {
-                console.error("Failed to handle orphan room : ", e);
-            }
+            console.error("Failed to manage room or folder : ", e);
+            Sentry.captureException(e);
         }
     }
-    private isUserMemberOrInvited(room: Room): boolean {
-        const membershipStatus = room.getMyMembership();
 
-        if (membershipStatus === KnownMembership.Invite || membershipStatus === KnownMembership.Join) {
-            return true;
-        }
-        return false;
-    }
-    private getFirstParentRoomID(room: Room): string | undefined {
-        const parentRoomsIDs = this.getParentRoomID(room);
-
-        return parentRoomsIDs.length > 0 ? parentRoomsIDs[0] : undefined;
-    }
     private async tryAddRoomToParentFolder(room: Room, parentRoomID: string): Promise<boolean> {
         try {
-            const isSpaceRoom = room.isSpaceRoom();
             const parentFolder = await this.findParentFolder(parentRoomID);
 
             if (!parentFolder) {
+                const parentRoom = this.client?.getRoom(parentRoomID);
+                if (parentRoom) {
+                    await this.manageRoomOrFolder(parentRoom);
+                } else {
+                    this.handleOrphanRoom(room);
+                }
+
                 return false;
             }
 
-            this.addRoomToParentFolder(room, parentFolder, isSpaceRoom);
+            this.addRoomToParentFolder(room, parentFolder);
             return true;
         } catch (e) {
             console.error("Error in tryAddRoomToParentFolder:", e);
@@ -546,20 +530,35 @@ export class MatrixChatConnection implements ChatConnectionInterface {
         return null;
     }
 
-    private addRoomToParentFolder(room: Room, parentFolder: MatrixRoomFolder, isSpaceRoom: boolean): void {
+    private addRoomToParentFolder(room: Room, parentFolder: MatrixRoomFolder): void {
+        const isSpaceRoom = room.isSpaceRoom();
+        const roomId = room.roomId;
+
+        // Add room/folder to parent's lists
         if (isSpaceRoom) {
-            this.roomFolders.delete(room.roomId);
+            parentFolder.folderList.set(roomId, new MatrixRoomFolder(room));
         } else {
-            parentFolder.roomList.set(room.roomId, new MatrixChatRoom(room));
+            parentFolder.roomList.set(roomId, new MatrixChatRoom(room));
         }
+
+        if (get(parentFolder.myMembership) === KnownMembership.Join) {
+            this.roomList.delete(roomId);
+            this.roomFolders.delete(roomId);
+            return;
+        }
+
+        const rootList = isSpaceRoom ? this.roomFolders : this.roomList;
+        const RoomClass = isSpaceRoom ? MatrixRoomFolder : MatrixChatRoom;
+        rootList.set(roomId, new RoomClass(room));
     }
 
-    private async handleOrphanRoom(room: Room): Promise<void> {
+    private handleOrphanRoom(room: Room): void {
         if (room.isSpaceRoom()) {
-            await this.createAndAddNewRootFolder(room);
-        } else {
-            this.createAndAddNewRootRoom(room);
+            this.createAndAddNewRootFolder(room);
+            return;
         }
+
+        this.createAndAddNewRootRoom(room);
     }
 
     private async findRoomOrFolder(roomId: string): Promise<MatrixRoomFolder | MatrixChatRoom | undefined> {
@@ -582,17 +581,21 @@ export class MatrixChatConnection implements ChatConnectionInterface {
         return node;
     }
 
-    private async createAndAddNewRootFolder(room: Room): Promise<void> {
+    private createAndAddNewRootFolder(room: Room): void {
         if (this.roomFolders.get(room.roomId)) return;
         const newFolder = new MatrixRoomFolder(room);
         this.roomFolders.set(newFolder.id, newFolder);
-        await newFolder.init();
+        newFolder.init();
 
         newFolder
             .getRoomsIdInNode()
             .then((roomIDs) => {
+                if (get(newFolder.myMembership) === KnownMembership.Invite) {
+                    return;
+                }
                 roomIDs.forEach((roomID) => {
                     this.roomList.delete(roomID);
+                    this.roomFolders.delete(roomID);
                 });
             })
             .catch((e) => {
@@ -700,7 +703,15 @@ export class MatrixChatConnection implements ChatConnectionInterface {
 
         try {
             this.roomCreationInProgress.set(true);
-            return await this.client.createRoom(this.mapCreateRoomOptionsToMatrixCreateRoomOptions(roomOptions));
+            const result = await this.client.createRoom(
+                this.mapCreateRoomOptionsToMatrixCreateRoomOptions(roomOptions)
+            );
+
+            if (roomOptions.parentSpaceID && result) {
+                await this.addRoomToSpace(roomOptions.parentSpaceID, result.room_id, roomOptions.suggested);
+            }
+
+            return result;
         } catch (error) {
             throw this.handleMatrixError(error);
         } finally {
@@ -714,7 +725,7 @@ export class MatrixChatConnection implements ChatConnectionInterface {
                 if (state === SyncState.Syncing) {
                     if (timer) clearTimeout(timer);
                     if (!this.client) {
-                        reject(CLIENT_NOT_INITIALIZED_ERROR_MSG);
+                        reject(new Error(CLIENT_NOT_INITIALIZED_ERROR_MSG));
                         return;
                     }
                     this.client.off(ClientEvent.Sync, resolveIfIsASyncingEvent);
@@ -724,7 +735,7 @@ export class MatrixChatConnection implements ChatConnectionInterface {
 
             const timer = setTimeout(() => {
                 if (!this.client) {
-                    reject(CLIENT_NOT_INITIALIZED_ERROR_MSG);
+                    reject(new Error(CLIENT_NOT_INITIALIZED_ERROR_MSG));
                     return;
                 }
                 this.client.off(ClientEvent.Sync, resolveIfIsASyncingEvent);
@@ -748,7 +759,7 @@ export class MatrixChatConnection implements ChatConnectionInterface {
 
             if (roomOptions.parentSpaceID && result) {
                 try {
-                    await this.addRoomToSpace(roomOptions.parentSpaceID, result.room_id);
+                    await this.addRoomToSpace(roomOptions.parentSpaceID, result.room_id, roomOptions.suggested);
 
                     await this.waitForNextSync();
                     return result;
@@ -767,14 +778,13 @@ export class MatrixChatConnection implements ChatConnectionInterface {
             throw this.handleMatrixError(error);
         }
     }
-    private handleMatrixError(error: unknown) {
+    private handleMatrixError(error: unknown): Error {
         if (error instanceof MatrixError) {
-            error.data.error;
             // eslint-disable-next-line @typescript-eslint/ban-ts-comment
             //@ts-ignore
             return new Error(error.data.error, { cause: error });
         }
-        return error;
+        return asError(error);
     }
     private mapCreateRoomOptionsToMatrixCreateRoomOptions(roomOptions: CreateRoomOptions): ICreateRoomOpts {
         const roomName = roomOptions.name;
@@ -786,9 +796,17 @@ export class MatrixChatConnection implements ChatConnectionInterface {
             name: roomName.trim(),
             visibility: roomOptions.visibility as Visibility | undefined,
             room_alias_name: slugify(roomName),
-            invite: roomOptions.invite?.map((invitation) => invitation.value) ?? [],
+            invite:
+                roomOptions.invite
+                    ?.map((invitation) => invitation.value)
+                    .filter((invitation) => invitation !== undefined && invitation !== this.client?.getSafeUserId()) ??
+                [],
             is_direct: roomOptions.is_direct,
             initial_state: this.computeInitialState(roomOptions),
+            power_level_content_override: {
+                // @ts-ignore TODO: fix type
+                suggested: roomOptions.suggested ?? false,
+            },
         };
     }
 
@@ -802,7 +820,11 @@ export class MatrixChatConnection implements ChatConnectionInterface {
             name: roomName.trim(),
             visibility: (roomOptions.visibility === "public" ? "public" : "private") as Visibility | undefined,
             room_alias_name: slugify(roomName),
-            invite: roomOptions.invite?.map((invitation) => invitation.value) ?? [],
+            invite:
+                roomOptions.invite
+                    ?.map((invitation) => invitation.value)
+                    .filter((invitation) => invitation !== undefined && invitation !== this.client?.getSafeUserId()) ??
+                [],
             initial_state: this.computeInitialState(roomOptions),
             topic: roomOptions.description,
             creation_content: {
@@ -857,7 +879,7 @@ export class MatrixChatConnection implements ChatConnectionInterface {
 
     async createDirectRoom(userToInvite: string): Promise<(ChatRoom & ChatRoomMembershipManagement) | undefined> {
         if (!this.client) {
-            return Promise.reject(CLIENT_NOT_INITIALIZED_ERROR_MSG);
+            return Promise.reject(new Error(CLIENT_NOT_INITIALIZED_ERROR_MSG));
         }
 
         const existingDirectRoom = this.getDirectRoomFor(userToInvite);
@@ -903,16 +925,13 @@ export class MatrixChatConnection implements ChatConnectionInterface {
                 const memberIDs = get(room.members)
                     .filter((member) => member.id && ["join", "invite"].includes(get(member.membership)))
                     .map((member) => member.id);
-
                 return (
                     room.type === "direct" &&
                     memberIDs.some((memberId) => memberId === userID && memberIDs.length === 2)
                 );
             })
             .map((room) => room);
-
         if (directRooms.length > 0) return directRooms[0];
-
         return undefined;
     }
 
@@ -973,7 +992,7 @@ export class MatrixChatConnection implements ChatConnectionInterface {
                     res(publicRoomsChunkRoom);
                 })
                 .catch((error) => {
-                    rej(error);
+                    rej(asError(error));
                 });
         });
     }
@@ -1025,7 +1044,7 @@ export class MatrixChatConnection implements ChatConnectionInterface {
         return this.matrixSecurity.openChooseDeviceVerificationMethodModal();
     }
 
-    private async addRoomToSpace(spaceRoomId: string, childRoomId: string): Promise<void> {
+    private async addRoomToSpace(spaceRoomId: string, childRoomId: string, suggested = false): Promise<void> {
         if (!this.client) {
             return Promise.reject(new Error(CLIENT_NOT_INITIALIZED_ERROR_MSG));
         }
@@ -1037,8 +1056,12 @@ export class MatrixChatConnection implements ChatConnectionInterface {
         }
 
         try {
-            // @ts-ignore
-            await this.client.sendStateEvent(spaceRoomId, EventType.SpaceChild, { via: [domain] }, childRoomId);
+            await this.client.sendStateEvent(
+                spaceRoomId,
+                EventType.SpaceChild,
+                { via: [domain], suggested },
+                childRoomId
+            );
             return;
         } catch (error) {
             console.error("Error adding room to space: ", error);
@@ -1073,6 +1096,49 @@ export class MatrixChatConnection implements ChatConnectionInterface {
 
         return new MatrixChatRoom(room);
     }
+
+    private async rebuildSpaceHierarchy() {
+        const client = this.client;
+        if (!client) return;
+
+        this.roomFolders.forEach((folder) => {
+            this.roomFolders.delete(folder.id);
+        });
+        const visibleSpaces = client.getVisibleRooms().filter((room) => room.isSpaceRoom());
+
+        const initPromises = visibleSpaces.map((space) => {
+            const spaceFolder = new MatrixRoomFolder(space);
+            //TODO: maybe delay init until folder is opened
+            spaceFolder.init();
+            if (this.getParentRoomID(space).length === 0) {
+                this.roomFolders.set(spaceFolder.id, spaceFolder);
+                spaceFolder
+                    .getRoomsIdInNode()
+                    .then((roomIDs) => {
+                        roomIDs.forEach((roomID) => {
+                            this.roomList.delete(roomID);
+                            this.roomFolders.delete(roomID);
+                        });
+                    })
+                    .catch((e) => {
+                        console.error("Failed to get child room IDs");
+                        Sentry.captureException(e);
+                    });
+            }
+        });
+
+        await Promise.allSettled(initPromises);
+    }
+
+    retrySendingEvents = async () => {
+        try {
+            const roomList = Array.from(this.roomList.values());
+            await Promise.allSettled(roomList.map((room) => room.retrySendingEvents()));
+        } catch (error) {
+            console.error("Unable to retry sending events", error);
+            Sentry.captureException(error);
+        }
+    };
 
     clearListener() {
         this.roomList.forEach((room) => {

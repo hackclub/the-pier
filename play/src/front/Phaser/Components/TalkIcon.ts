@@ -28,6 +28,10 @@ export class TalkIcon extends Phaser.GameObjects.Image {
     }
 
     private showAnimation(show = true, forceClose = false) {
+        if (!this.scene) {
+            // In case the TalkIcon is destroyed because the underlying character was destroyed.
+            return;
+        }
         if (forceClose && !show) {
             this.showAnimationTween?.stop();
         } else if (this.showAnimationTween?.isPlaying()) {
@@ -35,7 +39,7 @@ export class TalkIcon extends Phaser.GameObjects.Image {
         }
         this.shown = show;
         if (show) {
-            this.y += 50;
+            this.y += 20;
             this.scale = 0.05;
             this.alpha = 0;
         }

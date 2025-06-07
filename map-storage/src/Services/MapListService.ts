@@ -5,7 +5,7 @@ import {
     WAMFileFormat,
 } from "@workadventure/map-editor";
 import { WAMVersionHash } from "@workadventure/map-editor/src/WAMVersionHash";
-import pLimit from "p-limit";
+import pLimit, { LimitFunction } from "p-limit";
 import * as Sentry from "@sentry/node";
 import { wamFileMigration } from "@workadventure/map-editor/src/Migrations/WamFileMigration";
 import { fileSystem } from "../fileSystem";
@@ -22,14 +22,14 @@ export class MapListService {
     /**
      * A map containing a limiter. For a given cache file, one cannot modify if another modification is in process.
      */
-    private limiters: Map<string, pLimit.Limit>;
+    private limiters: Map<string, LimitFunction>;
 
     public static readonly CACHE_NAME = "__cache.json";
 
     private static maxReadLimit = pLimit(MAX_SIMULTANEOUS_FS_READS);
 
     constructor(private fileSystem: FileSystemInterface, private webHookService: WebHookService) {
-        this.limiters = new Map<string, pLimit.Limit>();
+        this.limiters = new Map<string, LimitFunction>();
     }
     public generateCacheFile(domain: string): Promise<void> {
         return this.limit(domain, () => {
@@ -69,7 +69,7 @@ export class MapListService {
                 };
             } else {
                 Sentry.captureException(outcome.reason);
-                console.log(outcome.reason);
+                console.error(`[${new Date().toISOString()}]`, outcome.reason);
             }
         }
 
@@ -99,7 +99,7 @@ export class MapListService {
         }
     }
 
-    private getLimiter(domain: string): pLimit.Limit {
+    private getLimiter(domain: string): LimitFunction {
         let limiter = this.limiters.get(domain);
         if (limiter === undefined) {
             limiter = pLimit(1);
@@ -108,7 +108,7 @@ export class MapListService {
         return limiter;
     }
 
-    private freeLimiter(domain: string, limiter: pLimit.Limit): void {
+    private freeLimiter(domain: string, limiter: LimitFunction): void {
         if (limiter.activeCount === 0 && limiter.pendingCount === 0) {
             this.limiters.delete(domain);
         }
@@ -200,12 +200,15 @@ export class MapListService {
             return cacheFile;
         } catch (e: unknown) {
             if (nbTry === 0) {
-                console.log("Trying to regenerate the cache file");
+                console.log(`[${new Date().toISOString()}] Trying to regenerate the cache file`);
                 // The file does not exist. Let's generate it
                 await this.generateCacheFileNoLimit(domain);
                 return this.readCacheFileNoLimit(domain, nbTry + 1);
             }
-            console.error(`Error while trying to read a cache file for domain ${domain}:`, e);
+            console.error(
+                `[${new Date().toISOString()}] Error while trying to read a cache file for domain ${domain}:`,
+                e
+            );
             Sentry.captureException(
                 `Error while trying to read a cache file for domain ${domain}: ${JSON.stringify(e)}`
             );

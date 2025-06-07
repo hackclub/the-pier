@@ -1,14 +1,11 @@
-![](https://github.com/thecodingmachine/workadventure/workflows/Continuous%20Integration/badge.svg) [![Discord](https://img.shields.io/discord/821338762134290432?label=Discord)](https://discord.gg/G6Xh9ZM9aR)
+![](https://github.com/thecodingmachine/workadventure/workflows/Continuous%20Integration/badge.svg) [![Discord](https://img.shields.io/discord/821338762134290432?label=Discord)](https://discord.gg/G6Xh9ZM9aR) ![Awesome](https://awesome.re/badge.svg)
 
-![WorkAdventure logo](README-LOGO.svg)
 ![WorkAdventure office image](README-MAP.png)
 
 Live demo [here](https://play.staging.workadventu.re/@/tcm/workadventure/wa-village).
 
 # WorkAdventure (THE PIER / HACKCLUB EDITION)
 
-WorkAdventure is a web-based collaborative workspace presented in the form of a
-16-bit video game.
 
 We plan to make our fork of WorkAdventure an awesome hangout & work space for Hack Clubbers
 
@@ -16,11 +13,11 @@ This will be used for one of the next Big HQ Projects™!
 
 In WorkAdventure you can move around your office and talk to your colleagues (using a video-chat system, triggered when you approach someone).
 
-See more features for your virtual office: https://workadventu.re/virtual-office
 
 ## Community resources
 
-Check out resources developed by the WorkAdventure community at [awesome-workadventure](https://github.com/workadventure/awesome-workadventure)
+1. Want to build your own map, check out our **[map building documentation](https://docs.workadventu.re/map-building/)**
+2. Check out resources developed by the WorkAdventure community at **[awesome-workadventure](https://github.com/workadventure/awesome-workadventure)**
 
 ## Setting up a production environment
 
@@ -85,4 +82,4 @@ This is potentially a pathway to implement Sign in with Slack
 
 ### Troubleshooting
 
-See our [troubleshooting guide](docs/others/troubleshooting.md).
+See our [troubleshooting guide](docs/others/troubleshooting.md). 

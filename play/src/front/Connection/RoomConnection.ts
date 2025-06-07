@@ -70,6 +70,7 @@ import {
     ExternalModuleMessage,
     LeaveChatRoomAreaMessage,
     SpaceDestroyedMessage,
+    SayMessage,
 } from "@workadventure/messages";
 import { slugify } from "@workadventure/shared-utils/src/Jitsi/slugify";
 import { BehaviorSubject, Subject } from "rxjs";
@@ -465,8 +466,6 @@ export class RoomConnection implements RoomConnection {
                                 break;
                             }
                             default: {
-                                // Security check: if we forget a "case", the line below will catch the error at compile-time.
-                                //@ts-ignore
                                 const _exhaustiveCheck: never = subMessage;
                             }
                         }
@@ -506,7 +505,7 @@ export class RoomConnection implements RoomConnection {
                             ? roomJoinedMessage.activatedInviteUser
                             : true
                     );
-                    this.canEdit = roomJoinedMessage.canEdit || this.isAdmin();
+                    this.canEdit = roomJoinedMessage.canEdit;
                     mapEditorActivated.set(ENABLE_MAP_EDITOR && this.canEdit);
 
                     // If there are scripts from the admin, run it
@@ -722,7 +721,6 @@ export class RoomConnection implements RoomConnection {
                 }
                 default: {
                     // Security check: if we forget a "case", the line below will catch the error at compile-time.
-                    //@ts-ignore
                     const _exhaustiveCheck: never = message;
                 }
             }
@@ -839,6 +837,17 @@ export class RoomConnection implements RoomConnection {
             message: {
                 $case: "setPlayerDetailsMessage",
                 setPlayerDetailsMessage: message,
+            },
+        });
+    }
+
+    public emitPlayerSayMessage(sayMessage: SayMessage | undefined) {
+        this.send({
+            message: {
+                $case: "setPlayerDetailsMessage",
+                setPlayerDetailsMessage: SetPlayerDetailsMessageTsProto.fromPartial({
+                    sayMessage,
+                }),
             },
         });
     }
@@ -1797,6 +1806,7 @@ export class RoomConnection implements RoomConnection {
             outlineColor: message.hasOutline ? message.outlineColor : undefined,
             variables: variables,
             chatID: message.chatID,
+            sayMessage: message.sayMessage,
         };
     }
 

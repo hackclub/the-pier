@@ -12,7 +12,6 @@ import menu from "./menu";
 import report from "./report";
 import refreshPrompt from "./refreshPrompt";
 import warning from "./warning";
-import emoji from "./emoji";
 import trigger from "./trigger";
 import notification from "./notification";
 import cowebsite from "./cowebsite";
@@ -23,6 +22,8 @@ import video from "./video";
 import statusModal from "./statusModal";
 import area from "./area";
 import externalModule from "./externalModule";
+import form from "./form";
+import say from "./say";
 
 const nl_NL = merge(en_US, {
     area,
@@ -38,7 +39,6 @@ const nl_NL = merge(en_US, {
     report,
     refreshPrompt,
     warning,
-    emoji,
     trigger,
     notification,
     cowebsite,
@@ -48,6 +48,8 @@ const nl_NL = merge(en_US, {
     video,
     statusModal,
     externalModule,
+    form,
+    say,
 });
 
 export default nl_NL;

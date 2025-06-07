@@ -34,10 +34,12 @@ import {
     ChatRoomNotificationControl,
     memberTypingInformation,
 } from "../ChatConnection";
-import { isAChatRoomIsVisible, navChat, selectedChatMessageToReply, selectedRoomStore } from "../../Stores/ChatStore";
+import { isAChatRoomIsVisible, navChat, selectedChatMessageToReply, botsChatIds } from "../../Stores/ChatStore";
+import { selectedRoomStore } from "../../Stores/SelectRoomStore";
 import { gameManager } from "../../../Phaser/Game/GameManager";
 import { localUserStore } from "../../../Connection/LocalUserStore";
-import { MessageNotification, notificationManager } from "../../../Notification";
+import { MessageNotification } from "../../../Notification/MessageNotification";
+import { notificationManager } from "../../../Notification/NotificationManager";
 import { MatrixChatMessage } from "./MatrixChatMessage";
 import { MatrixChatMessageReaction } from "./MatrixChatMessageReaction";
 import { matrixSecurity } from "./MatrixSecurity";
@@ -58,7 +60,6 @@ export class MatrixChatRoom
     messages: SearchableArrayStore<string, MatrixChatMessage>;
     members: Writable<MatrixChatRoomMember[]>;
     myMembership: Writable<ChatRoomMembership>;
-    messageReactions: MapStore<string, MapStore<string, MatrixChatMessageReaction>>;
     hasPreviousMessage: Writable<boolean>;
     timelineWindow: TimelineWindow;
     inMemoryEventsContent: Map<EventId, IContent>;
@@ -67,6 +68,8 @@ export class MatrixChatRoom
     isRoomFolder = false;
     areNotificationsMuted = writable(false);
     currentRoomMember: Readable<MatrixChatRoomMember>;
+    private notSentEvents: MapStore<string, MatrixEvent> = new MapStore<string, MatrixEvent>();
+    shouldRetrySendingEvents = derived(this.notSentEvents, (notSentEvents) => notSentEvents.size > 0);
 
     private handleRoomTimeline = this.onRoomTimeline.bind(this);
     private handleRoomName = this.onRoomName.bind(this);
@@ -96,7 +99,6 @@ export class MatrixChatRoom
         this.hasUnreadMessages = writable(matrixRoom.getUnreadNotificationCount() > 0);
         this.avatarUrl = matrixRoom.getAvatarUrl(matrixRoom.client.baseUrl, 24, 24, "scale") ?? undefined;
         this.messages = new SearchableArrayStore((item: MatrixChatMessage) => item.id);
-        this.messageReactions = new MapStore<string, MapStore<string, MatrixChatMessageReaction>>();
         this.sendMessage = this.sendMessage.bind(this);
         this.myMembership = writable(matrixRoom.getMyMembership());
 
@@ -178,19 +180,18 @@ export class MatrixChatRoom
         const decryptMessagesPromises: Promise<MatrixChatMessage | undefined>[] = [];
 
         events.forEach((event) => {
-            decryptMessagesPromises.push(this.readEventsToAddMessagesAndReactions(event, this.messageReactions));
+            decryptMessagesPromises.push(this.readEventsToAddMessagesAndReactions(event, this.messages));
         });
 
         const result = await Promise.all(decryptMessagesPromises);
-        const messages = result.filter((message) => message !== undefined) as MatrixChatMessage[];
+        const messages = result.filter((message) => message !== undefined);
         this.messages.push(...messages);
-
         this.hasPreviousMessage.set(this.timelineWindow.canPaginate(Direction.Backward));
     }
 
     private async readEventsToAddMessagesAndReactions(
         event: MatrixEvent,
-        messageReactions: MapStore<string, MapStore<string, MatrixChatMessageReaction>>
+        messages: SearchableArrayStore<string, MatrixChatMessage>
     ): Promise<MatrixChatMessage | undefined> {
         if (event.isEncrypted()) {
             await this.matrixRoom.client.decryptEventIfNeeded(event).catch(() => {
@@ -203,14 +204,13 @@ export class MatrixChatRoom
             return new MatrixChatMessage(event, this.matrixRoom);
         }
         if (event.getType() === "m.reaction") {
-            this.handleNewMessageReaction(event, messageReactions);
+            this.handleNewMessageReaction(event, messages);
             this.addEventContentInMemory(event);
         }
         return undefined;
     }
 
     private startHandlingChatRoomEvents() {
-        //eslint-disable-next-line @typescript-eslint/no-misused-promises
         this.matrixRoom.on(RoomEvent.Timeline, this.handleRoomTimeline);
         this.matrixRoom.on(RoomEvent.Name, this.handleRoomName);
         this.matrixRoom.on(RoomEvent.Redaction, this.handleRoomRedaction);
@@ -256,6 +256,19 @@ export class MatrixChatRoom
                 }
                 this.hasUnreadMessages.set(room.getUnreadNotificationCount() > 0);
                 if (event.getType() === "m.room.message") {
+                    const eventId = event.getId();
+
+                    if (event.status === EventStatus.NOT_SENT) {
+                        if (eventId && !this.notSentEvents.has(eventId)) {
+                            this.notSentEvents.set(eventId, event);
+                        }
+                        return;
+                    }
+
+                    if (eventId && this.notSentEvents.has(eventId)) {
+                        this.notSentEvents.delete(eventId);
+                    }
+
                     if (this.isEventReplacingExistingOne(event)) {
                         this.handleMessageModification(event);
                     } else {
@@ -263,10 +276,32 @@ export class MatrixChatRoom
                     }
                 }
                 if (event.getType() === "m.reaction") {
-                    this.handleNewMessageReaction(event, this.messageReactions);
+                    this.handleNewMessageReaction(event, this.messages);
                 }
             })().catch((error) => console.error(error));
         }
+    }
+
+    public async retrySendingEvents(): Promise<void> {
+        if (this.notSentEvents.size === 0) return Promise.resolve();
+
+        const promises = Array.from(this.notSentEvents.values()).map((event) => {
+            const eventId = event.getId();
+            return this.matrixRoom.client
+                .resendEvent(event, this.matrixRoom)
+                .catch((error: unknown) => {
+                    this.matrixRoom.client.cancelPendingEvent(event);
+                    console.error("Failed to resend event", eventId, error);
+                    Sentry.captureException(error);
+                })
+                .finally(() => {
+                    if (eventId) {
+                        this.notSentEvents.delete(eventId);
+                    }
+                });
+        });
+
+        await Promise.allSettled(promises);
     }
 
     private onRoomName(room: Room) {
@@ -280,8 +315,12 @@ export class MatrixChatRoom
     private handleNewMessage(event: MatrixEvent) {
         const message = new MatrixChatMessage(event, this.matrixRoom);
         this.messages.push(message);
-
         const senderID = event.getSender();
+        if (senderID) {
+            if (get(botsChatIds).includes(senderID)) {
+                return;
+            }
+        }
         if (senderID !== this.matrixRoom.client.getSafeUserId() && !get(this.areNotificationsMuted)) {
             this.notifyNewMessage(message);
             if (!isAChatRoomIsVisible() && get(selectedRoomStore)?.id !== "proximity") {
@@ -293,27 +332,29 @@ export class MatrixChatRoom
         this.addEventContentInMemory(event);
     }
 
-    private handleNewMessageReaction(
-        event: MatrixEvent,
-        messageReactions: MapStore<string, MapStore<string, MatrixChatMessageReaction>>
-    ) {
+    private handleNewMessageReaction(event: MatrixEvent, messages: SearchableArrayStore<string, MatrixChatMessage>) {
         const reactionEvent = this.getReactionEvent(event);
+
         if (reactionEvent !== undefined) {
             this.addEventContentInMemory(event);
             const { messageId, reactionKey } = reactionEvent;
-            const existingMessageWithReactions = messageReactions.get(messageId);
+            const existingMessageWithReactions = messages.get(messageId);
             if (existingMessageWithReactions) {
-                const existingMessageReaction = existingMessageWithReactions.get(reactionKey);
+                const existingMessageReaction = existingMessageWithReactions.reactions.get(reactionKey);
                 if (existingMessageReaction) {
                     existingMessageReaction.addUser(event.getSender(), event.getId());
                     return;
                 }
-                existingMessageWithReactions.set(reactionKey, new MatrixChatMessageReaction(this.matrixRoom, event));
+                existingMessageWithReactions.reactions.set(
+                    reactionKey,
+                    new MatrixChatMessageReaction(this.matrixRoom, event)
+                );
                 return;
             }
-            const newMessageReactionMap = new MapStore<string, MatrixChatMessageReaction>();
-            newMessageReactionMap.set(reactionKey, new MatrixChatMessageReaction(this.matrixRoom, event));
-            messageReactions.set(messageId, newMessageReactionMap);
+            //TODO : voir si reaction arrive avant le message
+            // const newMessageReactionMap = new MapStore<string, MatrixChatMessageReaction>();
+            // newMessageReactionMap.set(reactionKey, new MatrixChatMessageReaction(this.matrixRoom, event));
+            // messages.reactions.set(messageId, newMessageReactionMap);
         }
     }
 
@@ -363,6 +404,7 @@ export class MatrixChatRoom
             console.error("Redaction sender is undefined");
             return;
         }
+
         if (reactionEventContent === undefined) {
             console.error("No reaction event in memory to proceed deletion");
             return;
@@ -378,7 +420,8 @@ export class MatrixChatRoom
             console.error("Reaction (emoji) is undefined or event_id (message_id) is undefined");
             return;
         }
-        const messageReaction = this.messageReactions.get(reactionSourceMessageId);
+
+        const messageReaction = this.messages.get(reactionSourceMessageId)?.reactions;
         if (messageReaction === undefined) {
             console.error("Unable to find the message reaction");
             return;
@@ -404,12 +447,12 @@ export class MatrixChatRoom
             this.timelineWindow.unpaginate(existingEventsBeforePagination.length, false);
             const tempMatrixChatMessages: Promise<MatrixChatMessage | undefined>[] = [];
             this.timelineWindow.getEvents().forEach((event) => {
-                tempMatrixChatMessages.push(this.readEventsToAddMessagesAndReactions(event, this.messageReactions));
+                tempMatrixChatMessages.push(this.readEventsToAddMessagesAndReactions(event, this.messages));
             });
 
             const result = await Promise.all(tempMatrixChatMessages);
 
-            const messages = result.filter((message) => message !== undefined) as MatrixChatMessage[];
+            const messages = result.filter((message) => message !== undefined);
             this.messages.unshift(...messages);
             this.hasPreviousMessage.set(this.timelineWindow.canPaginate(Direction.Backward));
             if (messages.length === 0) {
@@ -627,7 +670,6 @@ export class MatrixChatRoom
     }
 
     destroy() {
-        //eslint-disable-next-line @typescript-eslint/no-misused-promises
         this.matrixRoom.off(RoomEvent.Timeline, this.handleRoomTimeline);
         this.matrixRoom.off(RoomEvent.Name, this.handleRoomName);
         this.matrixRoom.off(RoomEvent.Redaction, this.handleRoomRedaction);
@@ -635,6 +677,9 @@ export class MatrixChatRoom
         this.matrixRoom.off(RoomStateEvent.NewMember, this.handleNewMember);
         get(this.members).forEach((member) => {
             member.destroy();
+        });
+        this.messages.forEach((message) => {
+            message.relations?.destroy();
         });
     }
 
@@ -740,5 +785,21 @@ export class MatrixChatRoom
     }
     public async unban(userID: string): Promise<void> {
         await this.matrixRoom.client.unban(this.id, userID);
+    }
+
+    public async getMessageById(messageId: string): Promise<MatrixChatMessage | undefined> {
+        const message = this.messages.get(messageId);
+        if (message) {
+            return message;
+        }
+        const timeline = await this.matrixRoom.client.getEventTimeline(
+            this.matrixRoom.getUnfilteredTimelineSet(),
+            messageId
+        );
+        const event = timeline?.getEvents().find((ev) => ev.getId() === messageId);
+        if (event) {
+            return new MatrixChatMessage(event, this.matrixRoom);
+        }
+        return;
     }
 }

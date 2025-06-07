@@ -1,9 +1,8 @@
 import { get } from "svelte/store";
 import type CancelablePromise from "cancelable-promise";
-import type { PositionMessage, PositionMessage_Direction } from "@workadventure/messages";
-import { requestVisitCardsStore, selectedChatIDRemotePlayerStore } from "../../Stores/GameStore";
-import type { ActionsMenuAction } from "../../Stores/ActionsMenuStore";
-import { actionsMenuStore } from "../../Stores/ActionsMenuStore";
+import type { PositionMessage, PositionMessage_Direction, SayMessage } from "@workadventure/messages";
+import type { WokaMenuAction } from "../../Stores/WokaMenuStore";
+import { wokaMenuStore } from "../../Stores/WokaMenuStore";
 import { Character } from "../Entity/Character";
 import type { GameScene } from "../Game/GameScene";
 import type { ActivatableInterface } from "../Game/ActivatableInterface";
@@ -11,6 +10,7 @@ import { LL } from "../../../i18n/i18n-svelte";
 import { blackListManager } from "../../WebRtc/BlackListManager";
 import { showReportScreenStore } from "../../Stores/ShowReportScreenStore";
 import { iframeListener } from "../../Api/IframeListener";
+import banIcon from "../../Components/images/ban-icon.svg";
 
 export enum RemotePlayerEvent {
     Clicked = "Clicked",
@@ -39,7 +39,8 @@ export class RemotePlayer extends Character implements ActivatableInterface {
         visitCardUrl: string | null,
         companionTexturePromise: CancelablePromise<string>,
         activationRadius?: number,
-        private chatID: string | undefined = undefined
+        private chatID: string | undefined = undefined,
+        private sayMessage?: SayMessage
     ) {
         super(Scene, x, y, texturesPromise, name, direction, moving, 1, true, companionTexturePromise);
 
@@ -47,8 +48,12 @@ export class RemotePlayer extends Character implements ActivatableInterface {
         this.userId = userId;
         this.userUuid = userUuid;
         this.visitCardUrl = visitCardUrl;
-        this.setClickable(this.getDefaultActionsMenuActions().length > 0);
+        this.setClickable(this.getDefaultWokaMenuActions().length > 0);
         this.activationRadius = activationRadius ?? 96;
+
+        if (sayMessage) {
+            this.say(sayMessage.message, sayMessage.type);
+        }
 
         this.bindEventHandlers();
     }
@@ -65,19 +70,23 @@ export class RemotePlayer extends Character implements ActivatableInterface {
         }
     }
 
-    public registerActionsMenuAction(action: ActionsMenuAction): void {
-        actionsMenuStore.addAction({
+    public getVisitCardUrl(): string | null {
+        return this.visitCardUrl;
+    }
+
+    public registerWokaMenuAction(action: WokaMenuAction): void {
+        wokaMenuStore.addAction({
             ...action,
             priority: action.priority ?? 0,
             callback: () => {
                 action.callback();
-                actionsMenuStore.clear();
+                wokaMenuStore.clear();
             },
         });
     }
 
-    public unregisterActionsMenuAction(actionName: string) {
-        actionsMenuStore.removeAction(actionName);
+    public unregisterWokaMenuAction(actionName: string) {
+        wokaMenuStore.removeAction(actionName);
     }
 
     public activate(): void {
@@ -85,11 +94,11 @@ export class RemotePlayer extends Character implements ActivatableInterface {
     }
 
     public deactivate(): void {
-        actionsMenuStore.clear();
+        wokaMenuStore.clear();
     }
 
     public destroy(): void {
-        actionsMenuStore.clear();
+        wokaMenuStore.clear();
         super.destroy();
     }
 
@@ -98,13 +107,14 @@ export class RemotePlayer extends Character implements ActivatableInterface {
     }
 
     private toggleActionsMenu(): void {
-        if (get(actionsMenuStore) !== undefined) {
-            actionsMenuStore.clear();
+        if (get(wokaMenuStore) !== undefined) {
+            wokaMenuStore.clear();
             return;
         }
-        actionsMenuStore.initialize(this.playerName);
-        for (const action of this.getDefaultActionsMenuActions()) {
-            actionsMenuStore.addAction(action);
+        wokaMenuStore.initialize(this.playerName, this.userId, this.visitCardUrl ?? undefined);
+
+        for (const action of this.getDefaultWokaMenuActions()) {
+            wokaMenuStore.addAction(action);
         }
 
         const userFound = this.scene.getRemotePlayersRepository().getPlayers().get(this.userId);
@@ -117,32 +127,21 @@ export class RemotePlayer extends Character implements ActivatableInterface {
         iframeListener.sendRemotePlayerClickedEvent(userFound);
     }
 
-    private getDefaultActionsMenuActions(): ActionsMenuAction[] {
-        const actions: ActionsMenuAction[] = [];
-        if (this.visitCardUrl) {
-            actions.push({
-                actionName: get(LL).woka.menu.businessCard(),
-                protected: true,
-                priority: 1,
-                callback: () => {
-                    requestVisitCardsStore.set(this.visitCardUrl);
-                    selectedChatIDRemotePlayerStore.set(this.chatID ?? null);
-                    actionsMenuStore.clear();
-                },
-            });
-        }
-
+    private getDefaultWokaMenuActions(): WokaMenuAction[] {
+        const actions: WokaMenuAction[] = [];
         actions.push({
             actionName: blackListManager.isBlackListed(this.userUuid)
                 ? get(LL).report.block.unblock()
                 : get(LL).report.block.block(),
             protected: true,
             priority: -1,
-            style: "is-error",
+            style: "is-error bg-white/10 hover:bg-white/30 text-red-500",
             callback: () => {
                 showReportScreenStore.set({ userUuid: this.userUuid, userName: this.playerName });
-                actionsMenuStore.clear();
+                wokaMenuStore.clear();
             },
+            actionIcon: banIcon,
+            iconColor: "#EF4444",
         });
 
         return actions;

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import type { Client, IntrospectionResponse, OpenIDCallbackChecks } from "openid-client";
-import { Issuer, generators } from "openid-client";
+import { Issuer, generators, custom } from "openid-client";
 import { v4 } from "uuid";
 import type { Request, Response } from "express";
 import {
@@ -15,6 +15,10 @@ import {
     SECRET_KEY,
     OPID_TAGS_CLAIM,
 } from "../enums/EnvironmentVariable";
+
+custom.setHttpOptionsDefaults({
+    timeout: 50000,
+});
 
 class OpenIDClient {
     private issuerPromise: Promise<Client> | null = null;
@@ -185,8 +189,10 @@ class OpenIDClient {
 
     private encrypt(text: string): string {
         const iv = crypto.randomBytes(16);
+        // @ts-ignore Required because of a bug in svelte-check that is typechecking pusher for some reason
         const cipher = crypto.createCipheriv("aes-256-cbc", Buffer.from(this.secret), iv);
         let encrypted = cipher.update(text);
+        // @ts-ignore Required because of a bug in svelte-check that is typechecking pusher for some reason
         encrypted = Buffer.concat([encrypted, cipher.final()]);
         return iv.toString("hex") + "::" + encrypted.toString("hex");
     }
@@ -200,8 +206,11 @@ class OpenIDClient {
         const encryptedData = parts[1];
         const iv = Buffer.from(ivStr, "hex");
         const encryptedText = Buffer.from(encryptedData, "hex");
+        // @ts-ignore Required because of a bug in svelte-check that is typechecking pusher for some reason
         const decipher = crypto.createDecipheriv("aes-256-cbc", Buffer.from(this.secret), iv);
+        // @ts-ignore Required because of a bug in svelte-check that is typechecking pusher for some reason
         let decrypted = decipher.update(encryptedText);
+        // @ts-ignore Required because of a bug in svelte-check that is typechecking pusher for some reason
         decrypted = Buffer.concat([decrypted, decipher.final()]);
         return decrypted.toString();
     }

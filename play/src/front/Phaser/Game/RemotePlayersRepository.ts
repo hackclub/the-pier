@@ -1,5 +1,9 @@
-import type { PlayerDetailsUpdatedMessage, UserMovedMessage } from "@workadventure/messages";
-import { availabilityStatusToJSON } from "@workadventure/messages";
+import {
+    AvailabilityStatus,
+    availabilityStatusToJSON,
+    PlayerDetailsUpdatedMessage,
+    UserMovedMessage,
+} from "@workadventure/messages";
 import { Deferred } from "ts-deferred";
 import type { MessageUserJoined } from "../../Connection/ConnexionModels";
 import type { AddPlayerEvent } from "../../Api/Events/AddPlayerEvent";
@@ -17,6 +21,7 @@ export type PlayerDetailsUpdate = {
         outlineColor: boolean;
         showVoiceIndicator: boolean;
         availabilityStatus: boolean;
+        sayMessage: boolean;
     };
 };
 
@@ -54,6 +59,7 @@ export class RemotePlayersRepository {
                     availabilityStatus: true,
                     outlineColor: true,
                     showVoiceIndicator: true,
+                    sayMessage: true,
                 },
                 player,
             });
@@ -114,6 +120,7 @@ export class RemotePlayersRepository {
                     availabilityStatus: false,
                     outlineColor: false,
                     showVoiceIndicator: false,
+                    sayMessage: false,
                 },
                 player,
             };
@@ -136,7 +143,7 @@ export class RemotePlayersRepository {
             player.showVoiceIndicator = details.showVoiceIndicator;
             updateStruct.updated.showVoiceIndicator = true;
         }
-        if (details.availabilityStatus !== 0) {
+        if (details.availabilityStatus !== AvailabilityStatus.UNCHANGED) {
             player.availabilityStatus = details.availabilityStatus;
             updateStruct.updated.availabilityStatus = true;
         }
@@ -153,6 +160,10 @@ export class RemotePlayersRepository {
                 value: value,
                 playerId: player.userId,
             });
+        }
+        if (details.sayMessage) {
+            player.sayMessage = details.sayMessage;
+            updateStruct.updated.sayMessage = true;
         }
     }
 

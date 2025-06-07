@@ -12,6 +12,7 @@ import {
     PlayerDetailsUpdatedMessage,
     PointMessage,
     PositionMessage,
+    SayMessage,
     SetPlayerDetailsMessage,
     UserJoinedMessage,
     UserJoinedZoneMessage,
@@ -49,7 +50,8 @@ export class UserDescriptor {
         private variables: { [key: string]: string },
         private companionTexture?: CompanionTextureMessage,
         private outlineColor?: number,
-        private chatID?: string
+        private chatID?: string,
+        private sayMessage?: SayMessage
     ) {
         if (!Number.isInteger(this.userId)) {
             throw new Error("UserDescriptor.userId is not an integer: " + this.userId);
@@ -72,7 +74,8 @@ export class UserDescriptor {
             message.variables,
             message.companionTexture,
             message.hasOutline ? message.outlineColor : undefined,
-            message.chatID
+            message.chatID,
+            message.sayMessage
         );
     }
 
@@ -94,12 +97,20 @@ export class UserDescriptor {
             }
         }
         const availabilityStatus = playerDetails.availabilityStatus;
-        if (availabilityStatus !== 0) {
+        if (availabilityStatus !== AvailabilityStatus.UNCHANGED) {
             this.availabilityStatus = availabilityStatus;
         }
         const setVariable = playerDetails.setVariable;
         if (setVariable) {
             this.variables[setVariable.name] = setVariable.value;
+        }
+        const sayMessage = playerDetails.sayMessage;
+        if (sayMessage) {
+            if (!sayMessage.message) {
+                this.sayMessage = undefined;
+            } else {
+                this.sayMessage = sayMessage;
+            }
         }
     }
 
@@ -117,8 +128,8 @@ export class UserDescriptor {
             hasOutline: this.outlineColor !== undefined,
             variables: this.variables,
             chatID: this.chatID,
+            sayMessage: this.sayMessage,
         };
-
         return userJoinedMessage;
     }
 

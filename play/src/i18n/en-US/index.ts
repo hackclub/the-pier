@@ -11,7 +11,6 @@ import menu from "./menu";
 import report from "./report";
 import refreshPrompt from "./refreshPrompt";
 import warning from "./warning";
-import emoji from "./emoji";
 import trigger from "./trigger";
 import notification from "./notification";
 import cowebsite from "./cowebsite";
@@ -19,9 +18,11 @@ import actionbar from "./actionbar";
 import mapEditor from "./mapEditor";
 import megaphone from "./megaphone";
 import video from "./video";
+import say from "./say";
 import statusModal from "./statusModal";
 import area from "./area";
 import externalModule from "./externalModule";
+import form from "./form";
 
 const en_US: BaseTranslation = {
     area,
@@ -37,7 +38,6 @@ const en_US: BaseTranslation = {
     report,
     refreshPrompt,
     warning,
-    emoji,
     trigger,
     notification,
     cowebsite,
@@ -45,8 +45,10 @@ const en_US: BaseTranslation = {
     mapEditor,
     megaphone,
     video,
+    say,
     statusModal,
     externalModule,
+    form,
 };
 
 export default en_US;

@@ -97,6 +97,7 @@ export const ROOM_API_SECRET_KEY = env.ROOM_API_SECRET_KEY;
 // Map editor
 export const ENABLE_MAP_EDITOR: boolean = env.ENABLE_MAP_EDITOR;
 export const MAP_EDITOR_ALLOWED_USERS: string[] = env.MAP_EDITOR_ALLOWED_USERS;
+export const MAP_EDITOR_ALLOW_ALL_USERS: boolean = env.MAP_EDITOR_ALLOW_ALL_USERS;
 
 // Integration tools
 export const KLAXOON_ENABLED = env.KLAXOON_ENABLED;
@@ -123,6 +124,7 @@ export const MATRIX_ADMIN_USER: string | undefined = env.MATRIX_ADMIN_USER;
 export const MATRIX_ADMIN_PASSWORD: string | undefined = env.MATRIX_ADMIN_PASSWORD;
 export const MATRIX_DOMAIN: string | undefined = env.MATRIX_DOMAIN;
 
+export const ENABLE_SAY: boolean = env.ENABLE_SAY || true;
 // Front container:
 export const FRONT_ENVIRONMENT_VARIABLES: FrontConfigurationInterface = {
     DEBUG_MODE: env.DEBUG_MODE,
@@ -190,4 +192,5 @@ export const FRONT_ENVIRONMENT_VARIABLES: FrontConfigurationInterface = {
     ENABLE_CHAT_DISCONNECTED_LIST,
     MATRIX_ADMIN_USER,
     MATRIX_DOMAIN,
+    ENABLE_SAY: env.ENABLE_SAY || true,
 };

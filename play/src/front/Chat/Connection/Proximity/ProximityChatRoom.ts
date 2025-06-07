@@ -18,7 +18,8 @@ import { iframeListener } from "../../../Api/IframeListener";
 import { SpaceInterface } from "../../../Space/SpaceInterface";
 import { SpaceRegistryInterface } from "../../../Space/SpaceRegistry/SpaceRegistryInterface";
 import { chatVisibilityStore } from "../../../Stores/ChatStore";
-import { isAChatRoomIsVisible, navChat, selectedRoomStore } from "../../Stores/ChatStore";
+import { isAChatRoomIsVisible, navChat, shouldRestoreChatStateStore } from "../../Stores/ChatStore";
+import { selectedRoomStore } from "../../Stores/SelectRoomStore";
 import { SpaceFilterInterface, SpaceUserExtended } from "../../../Space/SpaceFilter/SpaceFilter";
 import { mapExtendedSpaceUserToChatUser } from "../../UserProvider/ChatUserMapper";
 import { SimplePeer } from "../../../WebRtc/SimplePeer";
@@ -26,7 +27,9 @@ import { bindMuteEventsToSpace } from "../../../Space/Utils/BindMuteEvents";
 import { gameManager } from "../../../Phaser/Game/GameManager";
 import { availabilityStatusStore, requestedCameraState, requestedMicrophoneState } from "../../../Stores/MediaStore";
 import { localUserStore } from "../../../Connection/LocalUserStore";
-import { MessageNotification, notificationManager } from "../../../Notification";
+import { MessageNotification } from "../../../Notification/MessageNotification";
+import { notificationManager } from "../../../Notification/NotificationManager";
+import { blackListManager } from "../../../WebRtc/BlackListManager";
 
 export class ProximityChatMessage implements ChatMessage {
     isQuotedMessage = undefined;
@@ -34,7 +37,7 @@ export class ProximityChatMessage implements ChatMessage {
     isDeleted = writable(false);
     isModified = writable(false);
     canDelete = writable(false);
-
+    reactions: MapStore<string, ChatMessageReaction> = new MapStore();
     constructor(
         public id: string,
         public sender: ChatUser,
@@ -82,6 +85,8 @@ export class ProximityChatRoom implements ChatRoom {
     isRoomFolder = false;
     lastMessageTimestamp = 0;
     hasUserInProximityChat = writable(false);
+    currentMatrixRoom: ChatRoom | undefined;
+    currentChatVisibility = false;
 
     private unknownUser = {
         chatId: "0",
@@ -368,13 +373,18 @@ export class ProximityChatRoom implements ChatRoom {
 
     public joinSpace(spaceName: string): void {
         this._space = this.spaceRegistry.joinSpace(spaceName);
-        bindMuteEventsToSpace(this._space);
 
         this._spaceWatcher = this._space.watchAllUsers();
+        bindMuteEventsToSpace(this._space, this._spaceWatcher);
         this.usersUnsubscriber = this._spaceWatcher.usersStore.subscribe((users) => {
             this.users = users;
             this.hasUserInProximityChat.set(users.size > 1);
         });
+
+        const isBlackListed = (sender: string) => {
+            const uuid = this.users?.get(sender)?.uuid;
+            return uuid && blackListManager.isBlackListed(uuid);
+        };
 
         this.spaceWatcherUserJoinedObserver = this._spaceWatcher.observeUserJoined.subscribe((spaceUser) => {
             if (spaceUser.spaceUserId === this._spaceUserId) {
@@ -389,6 +399,9 @@ export class ProximityChatRoom implements ChatRoom {
 
         this.spaceMessageSubscription?.unsubscribe();
         this.spaceMessageSubscription = this._space.observePublicEvent("spaceMessage").subscribe((event) => {
+            if (isBlackListed(event.sender)) {
+                return;
+            }
             this.addNewMessage(event.spaceMessage.message, event.sender);
 
             // if the proximity chat is not open, open it to see the message
@@ -398,6 +411,9 @@ export class ProximityChatRoom implements ChatRoom {
 
         this.spaceIsTypingSubscription?.unsubscribe();
         this.spaceIsTypingSubscription = this._space.observePublicEvent("spaceIsTyping").subscribe((event) => {
+            if (isBlackListed(event.sender)) {
+                return;
+            }
             if (event.spaceIsTyping.isTyping) {
                 this.addTypingUser(event.sender);
             } else {
@@ -406,6 +422,8 @@ export class ProximityChatRoom implements ChatRoom {
         });
 
         this.simplePeer.setSpaceFilter(this._spaceWatcher);
+
+        this.saveChatState();
 
         const actualStatus = get(availabilityStatusStore);
         if (!isAChatRoomIsVisible()) {
@@ -448,6 +466,8 @@ export class ProximityChatRoom implements ChatRoom {
         }
         this.hasUserInProximityChat.set(false);
 
+        this.restoreChatState();
+
         this.spaceWatcherUserJoinedObserver?.unsubscribe();
         this.spaceWatcherUserLeftObserver?.unsubscribe();
         if (this.usersUnsubscriber) {
@@ -459,6 +479,23 @@ export class ProximityChatRoom implements ChatRoom {
         this.spaceIsTypingSubscription?.unsubscribe();
 
         this.simplePeer.setSpaceFilter(undefined);
+    }
+
+    private restoreChatState() {
+        if (get(selectedRoomStore) == this && get(shouldRestoreChatStateStore)) {
+            selectedRoomStore.set(this.currentMatrixRoom);
+        }
+
+        chatVisibilityStore.set(this.currentChatVisibility);
+        shouldRestoreChatStateStore.set(false);
+    }
+
+    private saveChatState() {
+        const currentChatVisibility = get(chatVisibilityStore);
+        const currentRoom = get(selectedRoomStore);
+        this.currentChatVisibility = currentChatVisibility;
+        this.currentMatrixRoom = currentRoom;
+        shouldRestoreChatStateStore.set(true);
     }
 
     public destroy(): void {

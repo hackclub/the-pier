@@ -14,9 +14,9 @@ import { batchGetUserMediaStore } from "../Stores/MediaStore";
 import { analyticsClient } from "../Administration/AnalyticsClient";
 import { nbSoundPlayedInBubbleStore } from "../Stores/ApparentMediaContraintStore";
 import { SpaceFilterInterface } from "../Space/SpaceFilter/SpaceFilter";
-import { askDialogStore } from "../Stores/MeetingStore";
 import { RemotePlayersRepository } from "../Phaser/Game/RemotePlayersRepository";
-import { BasicNotification, notificationManager } from "../Notification";
+import { BubbleNotification as BasicNotification } from "../Notification/BubbleNotification";
+import { notificationManager } from "../Notification/NotificationManager";
 import LL from "../../i18n/i18n-svelte";
 import { mediaManager } from "./MediaManager";
 import { ScreenSharingPeer } from "./ScreenSharingPeer";
@@ -43,6 +43,8 @@ export class SimplePeer {
     private lastWebrtcPassword: string | undefined;
     private spaceFilterDeferred = new Deferred<SpaceFilterInterface>();
 
+    private pendingConnections: Map<number, AbortController> = new Map();
+
     private readonly _videoPeerAdded = new Subject<VideoPeer>();
     public readonly videoPeerAdded = this._videoPeerAdded.asObservable();
 
@@ -59,7 +61,7 @@ export class SimplePeer {
         //we make sure we don't get any old peer.
         peerStore.cleanupStore();
         screenSharingPeerStore.cleanupStore();
-        let localScreenCapture: MediaStream | null = null;
+        let localScreenCapture: MediaStream | undefined = undefined;
 
         //todo
         this.unsubscribers.push(
@@ -69,7 +71,7 @@ export class SimplePeer {
                     return;
                 }
 
-                if (streamResult.stream !== null) {
+                if (streamResult.stream !== undefined) {
                     localScreenCapture = streamResult.stream;
                     this.sendLocalScreenSharingStream(localScreenCapture).catch((e) => {
                         console.error("Error while sending local screen sharing stream to user", e);
@@ -78,7 +80,7 @@ export class SimplePeer {
                 } else {
                     if (localScreenCapture) {
                         this.stopLocalScreenSharingStream(localScreenCapture);
-                        localScreenCapture = null;
+                        localScreenCapture = undefined;
                     }
                 }
             })
@@ -158,7 +160,11 @@ export class SimplePeer {
             return;
         }
 
+        this.pendingConnections.set(user.userId, new AbortController());
+
         await this.createPeerConnection(user);
+
+        this.pendingConnections.delete(user.userId);
     }
 
     /**
@@ -187,6 +193,12 @@ export class SimplePeer {
         this.lastWebrtcUserName = user.webRtcUser;
         this.lastWebrtcPassword = user.webRtcPassword;
 
+        const controller = this.pendingConnections.get(user.userId);
+        if (controller && controller.signal.aborted) {
+            this.pendingConnections.delete(user.userId);
+            return null;
+        }
+
         const peer = new VideoPeer(
             user,
             user.initiator ? user.initiator : false,
@@ -200,7 +212,7 @@ export class SimplePeer {
         // the user sharing screen should also initiate a connection to the remote user!
         peer.on("connect", () => {
             const streamResult = get(screenSharingLocalStreamStore);
-            if (streamResult.type === "success" && streamResult.stream !== null) {
+            if (streamResult.type === "success" && streamResult.stream !== undefined) {
                 this.sendLocalScreenSharingStreamToUser(user.userId, streamResult.stream).catch((e) => {
                     console.error("Error while sending local screen sharing stream to user", e);
                     Sentry.captureException(e);
@@ -230,7 +242,7 @@ export class SimplePeer {
      */
     private async createPeerScreenSharingConnection(
         user: UserSimplePeerInterface,
-        stream: MediaStream | null
+        stream: MediaStream | undefined
     ): Promise<ScreenSharingPeer | null> {
         const peerScreenSharingConnection = screenSharingPeerStore.getPeer(user.userId);
         if (peerScreenSharingConnection) {
@@ -290,6 +302,12 @@ export class SimplePeer {
      * This is triggered twice. Once by the server, and once by a remote client disconnecting
      */
     private closeConnection(userId: number) {
+        const controller = this.pendingConnections.get(userId);
+        if (controller) {
+            controller.abort();
+            return;
+        }
+
         try {
             const peer = peerStore.getPeer(userId);
             if (peer === undefined) {
@@ -304,9 +322,6 @@ export class SimplePeer {
             // I do understand the method closeConnection is called twice, but I don't understand how they manage to run in parallel.
 
             this.closeScreenSharingConnection(userId);
-
-            // Close the ask dialog by user ID
-            askDialogStore.closeDialogByUserId(peer.userId);
         } catch (err) {
             console.error("An error occurred in closeConnection", err);
         }
@@ -319,11 +334,6 @@ export class SimplePeer {
         }
 
         peerStore.removePeer(userId);
-
-        // Close the ask dialog if no more users are in the discussion
-        if (peerStore.getSize() === 0) {
-            askDialogStore.closeAllDialog();
-        }
     }
 
     /**
@@ -391,8 +401,8 @@ export class SimplePeer {
         const uuid = (await this.remotePlayersRepository.getPlayer(data.userId)).userUuid;
         if (blackListManager.isBlackListed(uuid)) return;
         const streamResult = get(screenSharingLocalStreamStore);
-        let stream: MediaStream | null = null;
-        if (streamResult.type === "success" && streamResult.stream !== null) {
+        let stream: MediaStream | undefined = undefined;
+        if (streamResult.type === "success" && streamResult.stream !== undefined) {
             stream = streamResult.stream;
         }
 

@@ -4,7 +4,6 @@ import audio from "./audio";
 import camera from "./camera";
 import chat from "./chat";
 import companion from "./companion";
-import emoji from "./emoji";
 import error from "./error";
 import follow from "./follow";
 import login from "./login";
@@ -19,9 +18,11 @@ import actionbar from "./actionbar";
 import mapEditor from "./mapEditor";
 import megaphone from "./megaphone";
 import video from "./video";
+import say from "./statusModal";
 import statusModal from "./statusModal";
 import area from "./area";
 import externalModule from "./externalModule";
+import form from "./form";
 
 const fr_FR = merge(en_US, {
     area,
@@ -36,7 +37,6 @@ const fr_FR = merge(en_US, {
     menu,
     report,
     warning,
-    emoji,
     trigger,
     notification,
     cowebsite,
@@ -44,8 +44,10 @@ const fr_FR = merge(en_US, {
     mapEditor,
     megaphone,
     video,
+    say,
     statusModal,
     externalModule,
+    form,
 });
 
 export default fr_FR;
