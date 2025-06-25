@@ -14,7 +14,7 @@ const notification: BaseTranslation = {
         title: "Notifications access denied",
         permissionDenied: "Permission denied",
         content:
-            "Do not miss any discussion. Enable notifications to be notified someone wants to talk to you, even you are not on the WorkAdventure tab.",
+            "Do not miss any discussion. Enable notifications to be notified someone wants to talk to you, even you are not on The Pier tab.",
         firefoxContent:
             'Please click the "Remember this decision" checkbox, if you don\'t want Firefox to keep asking you the authorization.',
         refresh: "Refresh",

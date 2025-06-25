@@ -20,7 +20,7 @@ const externalModule: BaseTranslation = {
     discord: {
         integration: "INTEGRATION",
         explainText:
-            "By connecting your discord account here, you will be able to receive your messages directly in the workadventure chat. After synchronizing a server, we will create the rooms it contains, you will only have to join them in the Workadventure chat.",
+            "By connecting your discord account here, you will be able to receive your messages directly in The Pier chat. After synchronizing a server, we will create the rooms it contains, you will only have to join them in The Pier chat.",
         login: "Connect to Discord",
         fetchingServer: "Get your Discord servers... 👀",
         qrCodeTitle: "Scan the QR code with your Discord app to login.",
@@ -37,7 +37,7 @@ const externalModule: BaseTranslation = {
         saveSync: "Save and synchronize",
         logout: "Logout",
         guilds: "Discord servers",
-        guildExplain: "Select channels you want to add to Workadventure chat interface.\n",
+        guildExplain: "Select channels you want to add to The Pier chat interface.\n",
     },
 };
 
